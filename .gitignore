@@ -1,0 +1,14 @@
+# Secrets — never commit
+credentials.json
+token.json
+
+# Run output (contains recipient addresses)
+drafts_log.csv
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# OS
+.DS_Store
