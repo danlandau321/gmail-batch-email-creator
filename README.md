@@ -1,21 +1,37 @@
 # Gmail Batch Email Creator
 
-Turns a **Google Doc** (the message) plus a **Google Sheet** (the recipients) into
-**Gmail drafts** — one per row, personalized. It never sends anything; you review
-and send from Gmail.
+## What it is
+
+A command-line tool that takes a **Google Doc** (the message) and a **Google Sheet**
+(the recipients) and creates one personalized **Gmail draft** per row. Placeholders
+like `{{first_name}}` fill from the Sheet's columns.
+
+It never sends. The OAuth scope is `gmail.compose`, which only permits creating
+drafts — that's a property of the token itself, so no flag or bug can turn this into
+a sender. I review everything in Gmail and send by hand.
 
 ```bash
 cd ~/gmail-batch-email-creator
 .venv/bin/python batch_emailer.py --doc <doc-url> --sheet <sheet-url> --dry-run
 ```
 
-**It cannot send.** The OAuth scope is `gmail.compose`, which permits creating
-drafts and nothing else. That is a property of the token, not a policy in the
-code, so no flag or bug can turn this into a sender.
+There's also a natural-language wrapper. In Claude Code I can just say *"send the
+email in &lt;doc&gt; to the people in &lt;sheet&gt;"* and the `batch-email` skill dry-runs it,
+shows me the merge preview, and asks before creating anything.
 
-There is also a natural-language wrapper: in Claude Code, say *"send the email in
-&lt;doc&gt; to the people in &lt;sheet&gt;"* and the `batch-email` skill dry-runs it,
-shows you the merge preview, and asks before creating anything.
+## Why I built it
+
+I kept needing to send the same email to a list of people with a few details changed
+per person, and doing it by hand doesn't scale past a handful. Mail-merge services
+want to own your list and send on your behalf; I wanted the opposite — drafts sitting
+in my own Gmail that I read before anything goes out. Writing the copy in a Doc and
+keeping the list in a Sheet means I can edit both in the places I already work.
+
+## What it's built with
+
+Python 3, no framework. Just the Google API client libraries — Gmail, Docs, Sheets,
+and Drive — talking to a desktop OAuth client whose token lives on my machine. The
+whole thing is one self-contained script.
 
 ---
 
