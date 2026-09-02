@@ -1,5 +1,5 @@
 # Secrets — never commit
-credentials.json
+credentials.json*
 token.json
 
 # Run output (contains recipient addresses)
