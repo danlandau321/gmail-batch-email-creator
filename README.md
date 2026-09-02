@@ -15,10 +15,6 @@ cd ~/gmail-batch-email-creator
 .venv/bin/python batch_emailer.py --doc <doc-url> --sheet <sheet-url> --dry-run
 ```
 
-There's also a natural-language wrapper. In Claude Code I can just say *"send the
-email in &lt;doc&gt; to the people in &lt;sheet&gt;"* and the `batch-email` skill dry-runs it,
-shows me the merge preview, and asks before creating anything.
-
 ## Why I built it
 
 I kept needing to send the same email to a list of people with a few details changed
@@ -29,9 +25,9 @@ keeping the list in a Sheet means I can edit both in the places I already work.
 
 ## What it's built with
 
-Python 3, no framework. Just the Google API client libraries — Gmail, Docs, Sheets,
-and Drive — talking to a desktop OAuth client whose token lives on my machine. The
-whole thing is one self-contained script.
+Python 3.10+, no framework. Just the Google API client libraries — Gmail, Docs,
+Sheets, and Drive — talking to a desktop OAuth client whose token lives on my
+machine. The whole thing is one self-contained script.
 
 ---
 
@@ -39,20 +35,21 @@ whole thing is one self-contained script.
 
 ### 1. Google Cloud project
 
-The script talks to three APIs, so all three must be enabled in whatever Cloud
+The script talks to four APIs, so all four must be enabled in whatever Cloud
 project issues your credentials:
 
 - Gmail API
 - Google Docs API
 - Google Sheets API
+- Google Drive API
 
 At <https://console.cloud.google.com> → pick (or create) a project → **APIs &
 Services → Library** → search each one → **Enable**.
 
 ### 2. OAuth consent screen
 
-**APIs & Services → OAuth consent screen.** Internal user type if the project
-lives in a Google Workspace org you control; otherwise External, and add yourself under
+**APIs & Services → OAuth consent screen.** Internal user type if the project lives
+in a Google Workspace org you control; otherwise External, and add yourself under
 **Test users**. Nothing else on that screen matters for a personal script.
 
 ### 3. Desktop OAuth client
@@ -73,21 +70,30 @@ Google treats the client.
 If you must reuse a web client, register `http://localhost:8080/` as an
 authorized redirect URI on it and run with `--port 8080`.
 
-### 4. First run
+### 4. Install
 
 ```bash
-cd ~/gmail-batch-email-creator
+git clone https://github.com/danlandau321/gmail-batch-email-creator.git
+cd gmail-batch-email-creator
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+### 5. First run
+
+```bash
 .venv/bin/python batch_emailer.py --doc <doc-url> --sheet <sheet-url> --dry-run
 ```
 
 A browser opens; sign in as the account whose Gmail should hold the drafts and
-approve the three permissions:
+approve the permissions:
 
 | Permission asked | What it's for |
 |---|---|
 | Manage drafts and send email | Creating the drafts. The script only ever calls `drafts.create` — never `send`. |
 | See your Google Docs documents | Reading the message Doc. |
-| See, edit, create and delete your spreadsheets | Reading the recipient Sheet, and writing the `status` column back. |
+| See all your Google Sheets spreadsheets | Reading the recipient Sheet. Read-only. |
+| See and download your Google Drive files | Detecting whether `--sheet` is a native Sheet or an uploaded .xlsx. Read-only. |
 
 That writes `token.json` next to the script and it stops asking. Both
 `credentials.json` and `token.json` are gitignored — treat them like passwords.
@@ -108,7 +114,7 @@ one with `--section "Email 1"`. The section runs to the next heading of the same
 shape, or to a divider line.
 
 ```
-Subject: Quick intro — {{first_name}} <> AI Fund
+Subject: Quick intro — {{first_name}} <> Example Co
 
 Hi {{first_name}},
 
@@ -124,9 +130,8 @@ warning). Share the Doc with the account you authorized, or just own it.
 
 ## The Sheet
 
-Works with a native Google Sheet **or** an .xlsx uploaded to Drive. The .xlsx
-case is read-only — status can't be written back, so `drafts_log.csv` is the
-record of what was drafted.
+Works with a native Google Sheet **or** an .xlsx uploaded to Drive. Nothing is
+ever written back — the Sheet is read-only input.
 
 The header row is found automatically (the first row naming an email column), so
 title and legend rows above it are fine; `--header-row N` overrides. Tab names
@@ -135,9 +140,8 @@ match loosely — `--tab "CEOs & cofounders"` finds "CEOs & Co-founders".
 Narrow the list with `--filter COL=VAL`, e.g. `--filter tier=1`, repeatable, and
 `VAL` may be a comma-separated list.
 
-**The header names are the merge fields.** Matching
-ignores case, spaces and punctuation, so a column `Fund Name` fills
-`{{fund_name}}` or `{{Fund Name}}`.
+**The header names are the merge fields.** Matching ignores case, spaces and
+punctuation, so a column `Fund Name` fills `{{fund_name}}` or `{{Fund Name}}`.
 
 | Column | Required | Meaning |
 |---|---|---|
@@ -145,16 +149,20 @@ ignores case, spaces and punctuation, so a column `Fund Name` fills
 | `cc` / `bcc` | | Extra addresses, comma or semicolon separated |
 | `subject` | | Per-row subject, overrides the Doc's |
 | `attachments` | | Local file path(s), semicolon separated |
-| `status` | | Written back as `Draft created <date>`; those rows are skipped next run |
-| `draft_id` | | Written back with the Gmail draft id |
 | anything else | | Available to the Doc as `{{that_column}}` |
 
 If there's a `name` column but no `first_name`, the first word is used as
 `{{first_name}}` and the last as `{{last_name}}`.
 
-Add `status` and `draft_id` columns if you want the sheet to track itself —
-a re-run after a partial failure then picks up where it stopped instead of
-double-drafting.
+### Re-running
+
+The script keeps **no state**. Every eligible row is drafted on every run, so
+running the same command twice gives you two sets of drafts. That's deliberate —
+it keeps the Sheet clean and the tool predictable.
+
+In practice this doesn't bite, because nothing sends on its own: you see the
+duplicates in Gmail before anyone else does. Start with `--dry-run`, and use a
+fresh Sheet per send rather than re-running against an old one.
 
 ## Flags
 
@@ -164,22 +172,23 @@ double-drafting.
 | `--tab NAME` | Which sheet tab (default: the first one) |
 | `--section NAME` | Use one section of a multi-draft Doc, e.g. `"Email 1"` |
 | `--filter COL=VAL` | Only rows matching, e.g. `tier=1`; repeatable |
-| `--exclude COL=VAL` | Drop rows matching, e.g. `company="Jivi Health"` |
+| `--exclude COL=VAL` | Drop rows matching, e.g. `company="Example Co"` |
 | `--map PH=COL` | Fill a placeholder from another column, e.g. `name=first_name` |
 | `--header-row N` | Point at the header row if auto-detection misses |
 | `--limit N` | Only the first N eligible rows |
 | `--cc` / `--bcc` | Applied to every draft; repeatable |
 | `--attach PATH` | Attach a file to every draft; repeatable |
 | `--subject "..."` | Override the Doc's subject line |
-| `--force` | Re-draft rows that already have a status |
-| `--no-mark` | Don't write anything back to the sheet |
 | `--allow-missing` | Draft even when a `{{placeholder}}` has no value |
+| `--port N` | Fixed localhost port for the OAuth callback |
 
 By default a row whose placeholder has no value is **skipped**, so nobody gets
 "Hi ,". Use `--allow-missing` only when you mean it.
 
+Duplicate addresses within one run are skipped automatically.
+
 Every created draft is appended to `drafts_log.csv` (date, row, email, subject,
-draft id).
+draft id). That file is gitignored — it contains recipient addresses.
 
 ## Typical run
 
@@ -192,9 +201,12 @@ cd ~/gmail-batch-email-creator
 # 2. Two real drafts, eyeball them in Gmail
 .venv/bin/python batch_emailer.py --doc <doc> --sheet <sheet> --limit 2
 
-# 3. The rest (already-drafted rows are skipped via the status column)
+# 3. The rest
 .venv/bin/python batch_emailer.py --doc <doc> --sheet <sheet> --cc someone@example.com
 ```
+
+Step 2 creates two drafts that step 3 will create again — delete those two, or
+just accept four drafts for the first two people and delete the extras.
 
 ## Troubleshooting
 
@@ -206,3 +218,7 @@ cd ~/gmail-batch-email-creator
 | `Error 400: redirect_uri_mismatch` | `credentials.json` is a Web-application client, not a Desktop one. Redo step 3. |
 | `Access blocked: has not completed verification` | Add yourself as a Test user on the OAuth consent screen. |
 | `❌ No subject` | Add a `Subject:` first line to the Doc, a `subject` column, or pass `--subject`. |
+
+## License
+
+MIT

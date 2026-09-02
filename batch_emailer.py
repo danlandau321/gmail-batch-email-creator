@@ -31,11 +31,10 @@ Row 1 is the header row. Required: an "email" column (or "email address" /
     cc, bcc          extra addresses, comma or semicolon separated
     subject          per-row subject, overrides the Doc's
     attachments      local file path(s), semicolon separated
-    status           written back as "Draft created <date>" (skipped on re-run)
-    draft_id         written back with the Gmail draft id
 
-Rows with a non-empty status are skipped unless --force, so re-running after
-a partial failure won't double-draft.
+Every eligible row is drafted on every run — the script keeps no state in the
+sheet. Re-running the same command creates a second set of drafts, so use
+--dry-run first and a fresh sheet per send.
 
 ── Setup (one time) ─────────────────────────────────────────────────────
 Needs credentials.json — an OAuth "Desktop app" client — in this directory,
@@ -92,7 +91,7 @@ LOG_PATH = str(HERE / "drafts_log.csv")
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/documents.readonly",
-    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
     # Needed to detect the file type, and to download recipient lists that are
     # uploaded .xlsx files rather than native Google Sheets.
     "https://www.googleapis.com/auth/drive.readonly",
@@ -443,10 +442,9 @@ def _grid_to_rows(grid: list, header_idx: int) -> tuple:
 
 def load_sheet(sheets_service, drive_service, file_id: str, tab: Optional[str],
                header_row: Optional[int] = None) -> tuple:
-    """Returns (headers, rows, tab_name, writable).
+    """Returns (headers, rows, tab_name).
 
-    Handles both native Google Sheets and .xlsx files uploaded to Drive. An
-    .xlsx can be read but not written back to, so `writable` is False there.
+    Handles both native Google Sheets and .xlsx files uploaded to Drive.
     """
     meta = drive_service.files().get(
         fileId=file_id, fields="name,mimeType", supportsAllDrives=True
@@ -463,7 +461,6 @@ def load_sheet(sheets_service, drive_service, file_id: str, tab: Optional[str],
             .get(spreadsheetId=file_id, range=f"'{tab_name}'")
             .execute().get("values", [])
         )
-        writable = True
 
     elif mime == XLSX_MIME:
         try:
@@ -485,7 +482,6 @@ def load_sheet(sheets_service, drive_service, file_id: str, tab: Optional[str],
             for r in wb[tab_name].iter_rows(values_only=True)
         ]
         wb.close()
-        writable = False
 
     else:
         sys.exit(
@@ -500,7 +496,7 @@ def load_sheet(sheets_service, drive_service, file_id: str, tab: Optional[str],
     if header_idx:
         print(f"  ↳ header row is row {header_idx + 1}")
     headers, rows = _grid_to_rows(grid, header_idx)
-    return headers, rows, tab_name, writable
+    return headers, rows, tab_name
 
 
 def pick_email(row: dict) -> str:
@@ -649,32 +645,6 @@ def create_draft(gmail_service, message) -> str:
     return draft.get("id", "")
 
 
-# ============================================================
-# SHEET WRITE-BACK
-# ============================================================
-def write_back(sheets_service, sheet_id, tab_name, headers, updates):
-    """updates: list of (row_number, column_key, value)."""
-    if not updates:
-        return
-    data = []
-    for row_number, col_key, value in updates:
-        if col_key not in headers:
-            continue
-        col_idx = headers.index(col_key)
-        a1 = _col_letter(col_idx + 1)
-        data.append({
-            "range": f"'{tab_name}'!{a1}{row_number}",
-            "values": [[value]],
-        })
-    if not data:
-        return
-    sheets_service.spreadsheets().values().batchUpdate(
-        spreadsheetId=sheet_id,
-        body={"valueInputOption": "RAW", "data": data},
-    ).execute()
-    print(f"  ✍️  Updated {len(data)} cell(s) in the sheet")
-
-
 def _col_letter(n: int) -> str:
     out = ""
     while n:
@@ -715,8 +685,6 @@ def main():
     ap.add_argument("--attach", action="append", default=[], help="Attach a file to every draft (repeatable)")
     ap.add_argument("--limit", type=int, help="Only process the first N eligible rows")
     ap.add_argument("--dry-run", action="store_true", help="Preview; create nothing")
-    ap.add_argument("--force", action="store_true", help="Re-draft rows that already have a status")
-    ap.add_argument("--no-mark", action="store_true", help="Don't write status back to the sheet")
     ap.add_argument(
         "--port",
         type=int,
@@ -747,7 +715,7 @@ def main():
 
     gmail, docs, sheets, drive, sender = authenticate(port=args.port)
     doc_subject, body_text_tpl, body_html_tpl = load_doc(docs, doc_id, args.section)
-    headers, rows, tab_name, writable = load_sheet(
+    headers, rows, tab_name = load_sheet(
         sheets, drive, sheet_id, args.tab, args.header_row
     )
 
@@ -778,10 +746,6 @@ def main():
         who = ", ".join(r.get("name") or pick_email(r) for r in dropped) or "nobody"
         print(f"  🚫 Exclude {shown}: dropped {len(dropped)} ({who})")
 
-    has_status = "status" in headers and writable
-    has_draft_id = "draft_id" in headers and writable
-    if not writable and not args.dry_run:
-        print("  ℹ️  .xlsx source — status can't be written back; see drafts_log.csv")
     print()
 
     if args.dry_run:
@@ -789,7 +753,6 @@ def main():
 
     created = 0
     skipped = 0
-    updates = []
     log_rows = []
     seen_emails = set()
 
@@ -805,10 +768,6 @@ def main():
             continue
         if not EMAIL_RE.match(email):
             print(f"  [row {n}] ⏭️  invalid email '{email}' — skipped")
-            skipped += 1
-            continue
-        if "status" in headers and row.get("status") and not args.force:
-            print(f"  [row {n}] ⏭️  already done ({row['status']}) — skipped")
             skipped += 1
             continue
         if email.lower() in seen_emails:
@@ -859,10 +818,6 @@ def main():
                 draft_id = create_draft(gmail, msg)
                 created += 1
                 print(f"  [row {n}] 📧 {label} → {email}")
-                if has_status and not args.no_mark:
-                    updates.append((n, "status", f"Draft created {date.today().isoformat()}"))
-                if has_draft_id and not args.no_mark:
-                    updates.append((n, "draft_id", draft_id))
                 log_rows.append({
                     "date": date.today().isoformat(),
                     "row": n,
@@ -879,12 +834,6 @@ def main():
         if args.limit and created >= args.limit:
             print(f"\n  ⏹  Stopping at --limit {args.limit}")
             break
-
-    if updates and not args.dry_run:
-        try:
-            write_back(sheets, sheet_id, tab_name, headers, updates)
-        except Exception as e:
-            print(f"  ⚠️  Sheet write-back failed (drafts are fine): {e}")
 
     if log_rows:
         new_file = not os.path.exists(LOG_PATH)
