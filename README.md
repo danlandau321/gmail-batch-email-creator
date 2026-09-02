@@ -18,9 +18,8 @@ cd ~/gmail-batch-email-creator
 ## Why I built it
 
 I kept needing to send the same email to a list of people with a few details changed
-per person, and doing it by hand doesn't scale past a handful. Mail-merge services
-want to own your list and send on your behalf; I wanted the opposite — drafts sitting
-in my own Gmail that I read before anything goes out. Writing the copy in a Doc and
+per person, and doing it by hand doesn't scale past a handful. Third party services
+have fees and deliverability issues, and this is free. Writing the copy in a Doc and
 keeping the list in a Sheet means I can edit both in the places I already work.
 
 ## What it's built with
@@ -107,20 +106,24 @@ revoke access entirely: <https://myaccount.google.com/permissions>.
 
 The first line can set the subject; everything after it is the body.
 `[field]` works as well as `{{field}}` — but only when it names a real column,
-so prose like `[Luma link]` or `[TBD]` is left alone.
+so prose like `[venue TBD]` or `[link to come]` is left alone.
 
 If the Doc holds several drafts under headings like `Email 1` / `Email 2`, pick
 one with `--section "Email 1"`. The section runs to the next heading of the same
 shape, or to a divider line.
 
 ```
-Subject: Quick intro — {{first_name}} <> Example Co
+Subject: You're invited — {{event_name}}, {{event_date}}
 
 Hi {{first_name}},
 
-Saw {{fund_name}} led the round in ...
+{{event_name}} is on {{event_date}} at {{venue}}, and I'd love to have
+you there. Doors at 6, talks start at 7.
 
-Best,
+RSVP: {{rsvp_link}}
+
+Hope to see you!
+
 Dan
 ```
 
