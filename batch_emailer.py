@@ -67,6 +67,11 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", message=".*OpenSSL.*")
 
+# The macOS system proxy (Canopy content filter) intercepts TLS with its own
+# certificate, which makes every `requests`-based Google call fail. Bypass it.
+os.environ.setdefault("no_proxy", "*")
+os.environ.setdefault("NO_PROXY", "*")
+
 try:
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -116,6 +121,21 @@ SECTION_HEAD_RE = re.compile(r"^([A-Za-z][A-Za-z ]{0,20}?)\s*#?\s*(\d+)\b")
 # A divider line: ---, ———, —------, ___
 DIVIDER_RE = re.compile(r"^[\s\-—–_=*]{3,}$")
 
+# Gmail only adds the account signature to messages composed in the Gmail
+# window. Drafts created through the API get nothing, so it is appended here.
+# --no-signature turns this off.
+SIGNATURE_TEXT = (
+    "\n\n--\nDan Landau (he/him)\nSenior Marketing Manager\n"
+    "AI Fund | AI Ventures Management, LLC\nEastern Time Zone\n"
+)
+SIGNATURE_HTML = (
+    '<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+    '<div dir="ltr"><br>--<div><b>Dan Landau </b>(he/him)'
+    '<div>Senior Marketing Manager</div>'
+    '<div>AI Fund | AI Ventures Management, LLC</div>'
+    '<div>Eastern Time Zone</div></div></div></div>'
+)
+
 # Wrapper for the HTML body — matches the look of the existing outreach emails.
 HTML_WRAPPER = (
     '<div style="font-family: Arial, sans-serif; font-size: 14px; '
@@ -163,7 +183,7 @@ def authenticate(port: int = 0):
     creds = None
     if os.path.exists(TOKEN_FILE):
         try:
-            creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+            creds = Credentials.from_authorized_user_file(TOKEN_FILE)
         except Exception:
             creds = None
 
@@ -599,7 +619,21 @@ def is_excluded(row: dict, excludes: list) -> bool:
 # ============================================================
 # DRAFT CREATION
 # ============================================================
-def build_message(sender, to, subject, body_text, body_html, cc, bcc, attachments):
+def add_signature(body_text: str, body_html: str) -> tuple:
+    """Append the signature to both bodies, inside the HTML wrapper div."""
+    body_text = body_text.rstrip("\n") + SIGNATURE_TEXT
+    tail = "\n</div>"
+    if body_html.endswith(tail):
+        body_html = body_html[: -len(tail)] + "\n" + SIGNATURE_HTML + tail
+    else:
+        body_html = body_html + "\n" + SIGNATURE_HTML
+    return body_text, body_html
+
+
+def build_message(sender, to, subject, body_text, body_html, cc, bcc, attachments,
+                  signature: bool = True):
+    if signature:
+        body_text, body_html = add_signature(body_text, body_html)
     inner = MIMEMultipart("alternative")
     inner.attach(MIMEText(body_text, "plain", "utf-8"))
     inner.attach(MIMEText(body_html, "html", "utf-8"))
@@ -682,6 +716,9 @@ def main():
     ap.add_argument("--subject", help="Subject line, overrides the Doc's 'Subject:' line")
     ap.add_argument("--cc", action="append", default=[], help="CC on every draft (repeatable)")
     ap.add_argument("--bcc", action="append", default=[], help="BCC on every draft (repeatable)")
+    ap.add_argument("--no-signature", action="store_true",
+                    help="Don't append the signature (it is added by default, "
+                         "because Gmail never adds it to API-created drafts)")
     ap.add_argument("--attach", action="append", default=[], help="Attach a file to every draft (repeatable)")
     ap.add_argument("--limit", type=int, help="Only process the first N eligible rows")
     ap.add_argument("--dry-run", action="store_true", help="Preview; create nothing")
@@ -813,7 +850,8 @@ def main():
         else:
             try:
                 msg = build_message(
-                    sender, email, subject, text, html_body, cc, bcc, attachments
+                    sender, email, subject, text, html_body, cc, bcc, attachments,
+                    signature=not args.no_signature,
                 )
                 draft_id = create_draft(gmail, msg)
                 created += 1
@@ -847,6 +885,8 @@ def main():
     print("\n" + "=" * 62)
     verb = "would be created" if args.dry_run else "created"
     print(f"  ✅ {created} draft(s) {verb}   ⏭️  {skipped} skipped")
+    if created and not args.no_signature:
+        print("  ✍️  Signature appended to every draft (--no-signature to skip)")
     if not args.dry_run and created:
         print("  📬 Review them in Gmail → Drafts. Nothing was sent.")
     print("=" * 62 + "\n")

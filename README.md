@@ -108,6 +108,12 @@ The first line can set the subject; everything after it is the body.
 `[field]` works as well as `{{field}}` — but only when it names a real column,
 so prose like `[venue TBD]` or `[link to come]` is left alone.
 
+Your Gmail signature is appended to every draft automatically. Gmail only adds
+it to messages written in the Gmail window; drafts created through the API get
+nothing, so the script does it (the text lives in `SIGNATURE_TEXT` /
+`SIGNATURE_HTML` near the top of `batch_emailer.py`). Don't put a signature in
+the Doc or it will appear twice. `--no-signature` turns it off.
+
 If the Doc holds several drafts under headings like `Email 1` / `Email 2`, pick
 one with `--section "Email 1"`. The section runs to the next heading of the same
 shape, or to a divider line.
@@ -181,6 +187,7 @@ fresh Sheet per send rather than re-running against an old one.
 | `--limit N` | Only the first N eligible rows |
 | `--cc` / `--bcc` | Applied to every draft; repeatable |
 | `--attach PATH` | Attach a file to every draft; repeatable |
+| `--no-signature` | Don't append the signature (on by default) |
 | `--subject "..."` | Override the Doc's subject line |
 | `--allow-missing` | Draft even when a `{{placeholder}}` has no value |
 | `--port N` | Fixed localhost port for the OAuth callback |
