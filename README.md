@@ -218,6 +218,17 @@ cd ~/gmail-batch-email-creator
 Step 2 creates two drafts that step 3 will create again — delete those two, or
 just accept four drafts for the first two people and delete the extras.
 
+## Claude Code skill
+
+`skills/batch-email/SKILL.md` teaches Claude Code how to drive this script: say
+"send the email in <doc> to the people in <sheet>" and it extracts the two links,
+maps your phrasing onto flags, dry-runs, shows you one merged row, asks before the
+real run, and reports the count. To install it:
+
+```bash
+mkdir -p ~/.claude/skills && cp -r skills/batch-email ~/.claude/skills/
+```
+
 ## Troubleshooting
 
 | Message | Fix |
